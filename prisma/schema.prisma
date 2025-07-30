@@ -1,0 +1,169 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+}
+
+// --- Core User (Client/Admin) ---
+model User {
+  id        String    @id @default(uuid())
+  email     String    @unique
+  password  String // Store hashed password
+  name      String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  role      String    @default("ADMIN") // e.g., "ADMIN", "STAFF" - for future scaling
+}
+
+// --- PG Management ---
+model Property {
+  id        String    @id @default(uuid())
+  name      String
+  address   String
+  city      String?
+  state     String?
+  zipCode   String?
+  ownerName String? // If he's renting it from someone else
+  ownerContact String? // Contact of the property owner
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  rooms     Room[]
+}
+
+model Room {
+  id          String    @id @default(uuid())
+  name        String // e.g., "Room 101", "Bed A"
+  propertyId  String
+  property    Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  baseRent    Float     // Monthly base rent for this room/bed
+  capacity    Int       @default(1) // e.g., 1 for single, 2 for double
+  isOccupied  Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  tenants     Tenant[] // One room can have multiple tenants (e.g., sharing)
+}
+
+model Tenant {
+  id        String    @id @default(uuid())
+  fullName  String
+  contactNo String    @unique // Crucial for communication
+  email     String?   @unique
+  address   String?
+  idProofUrl String? // Link to uploaded ID proof (future: file storage)
+  moveInDate DateTime
+  moveOutDate DateTime? // Null if currently residing
+  roomId    String
+  room      Room      @relation(fields: [roomId], references: [id])
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  rentAccounts RentAccount[]
+}
+
+model RentAccount {
+  id          String    @id @default(uuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+  month       DateTime // To specify for which month the rent is due (e.g., first day of the month)
+  totalDue    Float    // Total rent expected for this month
+  amountPaid  Float    @default(0.0) // Amount paid so far for this month
+  isPaid      Boolean  @default(false)
+  // For partial payments: if amountPaid < totalDue, isPaid is false
+  // This will be updated programmatically
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  payments    RentPayment[] // Individual payment transactions
+}
+
+model RentPayment {
+  id            String    @id @default(uuid())
+  rentAccountId String
+  rentAccount   RentAccount @relation(fields: [rentAccountId], references: [id])
+  amount        Float
+  paymentDate   DateTime  @default(now())
+  paymentMethod String? // e.g., "Cash", "UPI", "Bank Transfer"
+  notes         String?
+  createdAt     DateTime  @default(now())
+}
+
+// --- Tiffin Service Management ---
+model TiffinCustomer {
+  id        String    @id @default(uuid())
+  fullName  String
+  contactNo String    @unique // Crucial for communication
+  email     String?   @unique
+  address   String? // Delivery address
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  subscriptions TiffinSubscription[]
+  tiffinPayments TiffinPayment[] // Direct payments, not tied to a specific subscription balance initially
+}
+
+model TiffinSubscription {
+  id          String    @id @default(uuid())
+  customerId  String
+  customer    TiffinCustomer @relation(fields: [customerId], references: [id])
+  planName    String // e.g., "Monthly Lunch", "Weekly Dinner"
+  pricePerPeriod Float // Price for the subscription period
+  startDate   DateTime
+  endDate     DateTime? // Null if ongoing, set if fixed period
+  isActive    Boolean   @default(true) // Can be paused/resumed
+  pausedUntil DateTime? // If subscription is paused, when it will resume
+  balanceDue  Float     @default(0.0) // Running balance for this subscription
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  dailyDeliveries TiffinDailyDelivery[]
+}
+
+model TiffinDailyDelivery {
+  id           String    @id @default(uuid())
+  subscriptionId String
+  subscription TiffinSubscription @relation(fields: [subscriptionId], references: [id])
+  deliveryDate DateTime // Date of this specific meal delivery
+  mealType     String // e.g., "Breakfast", "Lunch", "Dinner"
+  isDelivered  Boolean   @default(false)
+  notes        String?
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+}
+
+model TiffinPayment {
+  id           String    @id @default(uuid())
+  customerId   String
+  customer     TiffinCustomer @relation(fields: [customerId], references: [id])
+  amount       Float
+  paymentDate  DateTime  @default(now())
+  paymentMethod String?
+  notes        String?
+  // This payment is general for a customer, we will apply it to their outstanding subscription balance(s) in application logic
+  createdAt    DateTime  @default(now())
+}
+
+// --- General Financial Tracking ---
+model Expense {
+  id          String    @id @default(uuid())
+  description String
+  amount      Float
+  date        DateTime
+  category    String // e.g., "Utility", "Salary", "Groceries", "Owner Payout"
+  isPaid      Boolean   @default(true) // True if cash expense, false if bill to be paid later
+  isPayable   Boolean   @default(false) // True if this expense represents an amount owed to someone
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model OtherIncome {
+  id          String    @id @default(uuid())
+  description String
+  amount      Float
+  date        DateTime
+  category    String? // e.g., "Refund", "Deposit"
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
